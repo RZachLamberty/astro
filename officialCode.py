@@ -1,14 +1,12 @@
-import os
-import random
 import re
 
-import astropy.time
-#import emcee
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pylab
 
-from subprocess import call
+import filecache
+
 from scipy.special import sph_harm
 
 # load configurations
@@ -89,67 +87,12 @@ def gamma_func(dfEarth, dfPulsar, l, m, delta=1e-2, dMax=1e2):
     return dfGamma
 
 
-def retrieve_coordinates(pulsar):
-    coords = []
-
-    for (root, dirs, files) in os.walk('pars'):
-        for filename in files:
-            if filename.startswith(pulsar):
-                with open(os.path.join(root, filename), 'r') as f:
-                    t = f.read()
-
-                Lambda = float(
-                    re.search('\nLAMBDA\s+([\-\d\.D]+)', t).groups()[0]
-                ) * np.pi / 180
-                Beta = float(
-                    re.search('\nBETA\s+([\-\d\.D]+)', t).groups()[0]
-                ) * np.pi / 180
-                Cobeta = np.pi / 2 - Beta
-
-                return Lambda, Beta, Cobeta
-
-
-def get_sorted_data(pulsar, dense=False):
-    if dense:
-        fname = 'denseLocations/{}.dat'
-        names = [
-            'time',
-            'ssb0', 'ssb1', 'ssb2',
-            'sun0', 'sun1', 'sun2',
-            'ignore'
-        ]
-        sep = ' '
-    else:
-        fname = 'DMXWithPosition/{}.dat'
-        names = [
-            'time', 'dm', 'error',
-            'ssb0', 'ssb1', 'ssb2',
-            'sun0', 'sun1', 'sun2',
-            'ignore'
-        ]
-        sep = '\t'
-    fname = fname.format(pulsar)
-    df = pd.read_table(
-        fname, sep=sep, header=None, index_col=False, names=names, prefix='col'
-    )
-    df.loc[:, 'pulsar'] = pulsar
-    df = df.sort_values(by='time')
-    return df
-
-
-def load_pulsar_data(pulsars, dense=False):
-    return pd.concat(
-        objs=[get_sorted_data(pulsar, dense) for pulsar in pulsars],
-        ignore_index=True
-    )
-
-
 def gen_gamma(pulsar, l, m, dense=False):
     print(pulsar, l, m)
 
-    Lambda, Beta, Cobeta = retrieve_coordinates(pulsar)
+    Lambda, Beta, Cobeta = filecache.retrieve_coordinates(pulsar)
 
-    data = get_sorted_data(pulsar, dense)
+    data = filecache.get_sorted_data(pulsar, dense)
 
     ssbPulsar = 1e9 * np.array([
         np.sin(Cobeta) * np.cos(Lambda),
@@ -185,67 +128,6 @@ def gen_gamma(pulsar, l, m, dense=False):
     return dfGamma
 
 
-def save_gammas(dfGamma, pulsar, l, m, dense=False, version='new'):
-    fname = gamma_fname(pulsar, l, m, dense, version)
-    writeHeader = version == 'new'
-    dfGamma[['time', 'gamma']].to_csv(
-        fname, sep=' ', index=False, header=writeHeader
-    )
-
-
-def load_gammas(pulsar, l, m, dense=False, version='new'):
-    try:
-        fname = gamma_fname(pulsar, l, m, dense, version)
-        if version == 'new':
-            df = pd.read_csv(fname, sep=' ', index_col=False)
-        else:
-            df = pd.read_csv(
-                fname, sep=' ', index_col=False, header=None,
-                names=['time', 'gamma']
-            )
-
-        df.loc[:, 'pulsar'] = pulsar
-        df.loc[:, 'l'] = l
-        df.loc[:, 'm'] = m
-        df.loc[:, 'dense'] = dense
-
-    except pd.compat.FileNotFoundError:
-        print('WARNING: file not found')
-        df = pd.DataFrame()
-
-    return df
-
-
-def convert_gammas(dense):
-    pat = '(?P<pulsar>[^_]+)_(?P<l>[\-\d]+)_(?P<m>[\-\d]+)\.dat'
-
-    fdir = 'gammaArraysDense' if dense else 'gammaArrays'
-    for (root, dirs, files) in os.walk(fdir):
-        for filename in files:
-            try:
-                d = re.match(pat, filename).groupdict()
-                pulsar = d['pulsar']
-                l = int(d['l'])
-                m = int(d['m'])
-
-                # load old and save new
-                save_gammas(
-                    dfGamma=load_gammas(pulsar, l, m, dense, version='old'),
-                    pulsar=pulsar, l=l, m=m, dense=dense, version='new'
-                )
-            except Exception as e:
-                print(e)
-
-
-def gamma_fname(pulsar, l, m, dense=False, version='new'):
-    fdir = 'gammaArraysDense' if dense else 'gammaArrays'
-    v = 'v2.' if version == 'new' else ''
-    return os.path.join(
-        fdir,
-        '{pulsar:}_{l:}_{m:}.{v:}dat'.format(pulsar=pulsar, l=l, m=m, v=v)
-    )
-
-
 def phi_hat_projector(dfEarth, ssbPulsar):
     pHat = ssbPulsar / pylab.norm(ssbPulsar)
     phi = np.arctan(pHat[1] / pHat[0])
@@ -266,9 +148,9 @@ def theta_hat_projector(dfEarth, ssbPulsar):
 
 
 def gen_projections(pulsar, dense=False):
-    Lambda, Beta, Cobeta = retrieve_coordinates(pulsar)
+    Lambda, Beta, Cobeta = filecache.retrieve_coordinates(pulsar)
 
-    data = get_sorted_data(pulsar, dense)
+    data = filecache.get_sorted_data(pulsar, dense)
 
     ssbPulsar = 1e9 * np.array([
         np.sin(Cobeta) * np.cos(Lambda),
@@ -292,10 +174,6 @@ def gen_projections(pulsar, dense=False):
     dfAngles.loc[:, 'pulsar'] = pulsar
 
     return dfAngles
-
-
-def window(t, lb, ub):
-    return int(lb < t < ub)
 
 
 def timescale_boxcar(df, xname='time', yname='dm', errname='error',
@@ -341,35 +219,127 @@ def lms(lmax=L_MAX):
             yield (l, m)
 
 
-def add_grid_value(df, gridCol, valCol, grid, deltaGrid):
-    for (k, (gridLeft, gridRight)) in enumerate(zip(grid[:-1], grid[1:])):
-        inGrid = df[df[gridCol].between(gridLeft, gridRight)]
-        kLeft = '{}_{}'.format(valCol, k)
-        kRight = '{}_{}'.format(valCol, k + 1)
-        df.loc[inGrid.index, kLeft] = inGrid[valCol] * (
-            1 - (inGrid[gridCol] - gridLeft) / deltaGrid
+def smear(df, grid, gridCol, valCol, inclusive=True, subindexer=None):
+    """given a dataframe df with columns gridCol (the column which grid breaks
+    up into pieces) and valCol (the column whose value should be smeared onto
+    grid), smear to the left and right grid points proportional to the time
+    distance between those points. if inclusive is True, include the first and
+    last points; if not, exclude them. this is to do some funky problematic
+    backwards compatability with the way the window function was previously
+    implemented.
+
+    args:
+        df (pd.DataFrame): dataframe to be smeared (updated in place)
+        grid (list): a single list of gridpoints
+        gridCol (str): column name to be "gridded"
+        valCol (str): column name of value to smear
+        inclusive (bool): whether or not to include end points of grid
+            (default: True)
+        subindexer (None or pd.Series): if not None, will subset df to
+            df[subindexer] and apply the grid to that subset of the dataframe
+            (note: will create the columns regardless, so other values will
+            remain null)
+
+    """
+    if subindexer is None:
+        subindexer = pd.Series(data=True, index=df.index)
+
+    N = len(grid)
+    keys = ['{}_{}_{}'.format(valCol, N, i) for i in range(len(grid))]
+    for (i, (gridLeft, gridRight)) in enumerate(zip(grid[:-1], grid[1:])):
+        rowsToUpdate = (
+            subindexer
+            & df[gridCol].between(gridLeft, gridRight, inclusive=inclusive)
         )
-        df.loc[inGrid.index, kRight] = inGrid[valCol] * (
-            1 - (gridRight - inGrid[gridCol]) / deltaGrid
-        )
+
+        delta = gridRight - gridLeft
+        kLeft, kRight = keys[i: i + 2]
+
+        vals = df.loc[rowsToUpdate, valCol]
+        gridVals = df.loc[rowsToUpdate, gridCol]
+        df.loc[rowsToUpdate, kLeft] = vals * (gridRight - gridVals) / delta
+        df.loc[rowsToUpdate, kRight] = vals * (gridVals - gridLeft) / delta
+
+    df.loc[subindexer, keys] = df.loc[subindexer, keys].fillna(0)
 
 
-###########################
-# Compute Basis Functions #
-###########################
+def make_design_matrix(nRow, nCol, gammas, angles, masked=False):
+    """make the design matrix"""
+    m = np.zeros([nRow, nCol])
 
-if __name__ == '__main__':
+    # gamma
+    gammacols = sorted([
+        c for c in gammas.columns if re.match('gamma_\d_\d', c)
+    ])
+    mGamma = pd.melt(
+        gammas[~gammas.masked] if masked else gammas,
+        id_vars=['pulsar', 'time', 'l', 'm'],
+        value_vars=gammacols
+    )
+    mGamma = mGamma.set_index(['pulsar', 'time', 'l', 'm', 'variable']).sort_index()
+    mGamma = mGamma.unstack(['l', 'm', 'variable'])
+    mGamma = mGamma.fillna(0)
 
-    data = load_pulsar_data(pulsarsToInclude)
+    nGamma = mGamma.shape[1]
+    m[:, :nGamma] = mGamma.values
+
+    # (theta, phi) per gradient, block diagonal by pulsar
+    rowStart = 0
+    for pulsar in angles.pulsar.unique():
+        theseAngles = angles[(angles.pulsar == pulsar) & ~angles.masked]
+
+        # start row is rowStart, rowStop is that plus the number of time records
+        # available in the unmasked angles df
+        rowStop = rowStart + theseAngles.shape[0]
+
+        # right-most empty index in m is where columns start
+        colIsZero = (m == 0).all(axis=0)
+        colStart = np.where(colIsZero)[0][0]
+
+        n = T_DEPENDENT_GRADIENTS.get(pulsar)
+        for angleKey in ['theta', 'phi']:
+            # get the columns
+            if n is None or n == 1:
+                cols = [angleKey]
+            else:
+                cols = sorted([
+                    c for c in theseAngles.columns
+                    if re.match('{}_{}_\d'.format(angleKey, n), c)
+                ])
+
+                if n != len(cols):
+                    msg = "should have {} smeared vals in T_DEPENDENT_GRADIENTS"
+                    msg = msg.format(n)
+                    raise ValueError(msg)
+
+            # subset the array and paste 'er in
+            m[rowStart: rowStop, colStart: colStart + n] = theseAngles[cols].values
+
+            colStart += n
+
+        # constant term (for fitting)
+        m[rowStart: rowStop, colStart] = 1
+
+        rowStart = rowStop
+
+    return m
+
+
+def main():
+    ###########################
+    # Compute Basis Functions #
+    ###########################
+
+    data = filecache.load_pulsar_data(PULSARS_TO_INCLUDE)
 
     pulsarGammas = pd.concat(
         objs=[
             (
                 gen_gamma(pulsar, l, m, dense=False)
-                if doIntegrate
-                else load_gammas(pulsar, l, m, dense=False, version='new')
+                if DO_INTEGRATE
+                else filecache.load_gammas(pulsar, l, m, dense=False)
             )
-            for pulsar in pulsarsToInclude
+            for pulsar in PULSARS_TO_INCLUDE
             for (l, m) in lms()
         ],
         ignore_index=True
@@ -377,21 +347,21 @@ if __name__ == '__main__':
 
     angles = pd.concat(
         objs=[
-            gen_projections(pulsar, dense=False) for pulsar in pulsarsToInclude
+            gen_projections(pulsar, dense=False) for pulsar in PULSARS_TO_INCLUDE
         ],
         ignore_index=True
     )
 
-    dataDense = load_pulsar_data(pulsarsToInclude, dense=True)
+    dataDense = filecache.load_pulsar_data(PULSARS_TO_INCLUDE, dense=True)
 
     pulsarGammasDense = pd.concat(
         objs=[
             (
                 gen_gamma(pulsar, l, m, dense=True)
-                if doIntegrate
-                else load_gammas(pulsar, l, m, dense=True, version='new')
+                if DO_INTEGRATE
+                else filecache.load_gammas(pulsar, l, m, dense=True, version='new')
             )
-            for pulsar in pulsarsToInclude
+            for pulsar in PULSARS_TO_INCLUDE
             for (l, m) in lms()
         ],
         ignore_index=True
@@ -399,7 +369,7 @@ if __name__ == '__main__':
 
     anglesDense = pd.concat(
         objs=[
-            gen_projections(pulsar, dense=True) for pulsar in pulsarsToInclude
+            gen_projections(pulsar, dense=True) for pulsar in PULSARS_TO_INCLUDE
         ],
         ignore_index=True
     )
@@ -412,7 +382,10 @@ if __name__ == '__main__':
     # values are masked if they are between two values (a lower and upper bound)
     # specified in MASKS in the preamble above. The following will work for any
     # dataframe which has columns 'pulsar' and 'time'
-    for df in [data, pulsarGammas, angles]:
+    maskDfs = [
+        data, dataDense, pulsarGammas, pulsarGammasDense, angles, anglesDense
+    ]
+    for df in maskDfs:
         df.loc[:, 'masked'] = False
         for (pulsar, lb, ub) in MASKS:
             df.loc[
@@ -431,199 +404,182 @@ if __name__ == '__main__':
     ###########################
     # Collect all coordinates #
     ###########################
+
     coords = pd.DataFrame(
-        [retrieve_coordinates(pulsar) for pulsar in pulsarsToInclude],
+        [filecache.retrieve_coordinates(pulsar) for pulsar in PULSARS_TO_INCLUDE],
         columns=['lambda', 'beta', 'cobeta']
     )
+    coords.loc[:, 'pulsar'] = PULSARS_TO_INCLUDE
+    coords = coords.set_index('pulsar')
 
     #########################
     # Construct Interp Grid #
     #########################
-    tMin = data.time.min()
-    tMax = data.time.max()
-    tauGrid = np.linspace(tMin, tMax, N_GRID)
-    deltaTau = (tMax - tMin) / (N_GRID - 1)
 
-    # interpolate values to grid points we just calcd
-    add_grid_value(
-        df=pulsarGammas, gridCol='time', valCol='gamma', grid=tauGrid,
-        deltaGrid=deltaTau
+    # add "smeared" values to gamma, theta, and phi datasets based on N_GRID and
+    # the values in the T_DEPENDENT_GRADIENTS dict
+
+    # gammas are easy
+    grid = np.linspace(pulsarGammas.time.min(), pulsarGammas.time.max(), N_GRID)
+    smear(
+        df=pulsarGammas, grid=grid, gridCol='time', valCol='gamma',
+        inclusive=False, subindexer=None
     )
-    add_grid_value(
-        df=angles, gridCol='time', valCol='phi', grid=tauGrid,
-        deltaGrid=deltaTau
+    # to be consistent with pevious implementation, we use the previous time
+    # grid. I think this is wrong, and once we are in agreement with the end
+    # results we should undo this and see what goes wrong
+    smear(
+        df=pulsarGammasDense, grid=grid, gridCol='time', valCol='gamma',
+        inclusive=False, subindexer=None
     )
-    add_grid_value(
-        df=angles, gridCol='time', valCol='theta', grid=tauGrid,
-        deltaGrid=deltaTau
-    )
+
+    # phi and theta, less easy. we have to generate the grids on a per-pulsar
+    # basis, and we have weird time conventions
+    for n in set(T_DEPENDENT_GRADIENTS.values()):
+        for valCol in ['phi', 'theta']:
+            # group by pulsar and grid within that pulsar's times
+            for pulsar in angles.pulsar.unique():
+                subtimes = data[(data.pulsar == pulsar) & ~data.masked].time
+                grid = np.linspace(subtimes.min(), subtimes.max(), n)
+
+                subindexer = angles.pulsar == pulsar
+                smear(
+                    df=angles, grid=grid, gridCol='time', valCol=valCol,
+                    inclusive=False, subindexer=subindexer
+                )
+
+                subindexer = anglesDense.pulsar == pulsar
+                smear(
+                    df=anglesDense, grid=grid, gridCol='time', valCol=valCol,
+                    inclusive=True, subindexer=subindexer
+                )
 
     ######################
     # Make Design Matrix #
     ######################
 
     nRow = (~data.masked).sum()
+    nRowDense = dataDense.shape[0]
 
-    tdgDict = dict(tDependentGradients)
+    N_LMS = len(list(lms()))
+    N_GAMMA = N_LMS * N_GRID  # N_GRID spots for each l, m pair
     nCol = (
-        len(list(lms())) * N_GRID  # N_GRID spots for each l, m pair
+        N_GAMMA
         + sum([
-            1 + 2 * tdgDict.get(pulsar, 1)
-            for pulsar in pulsarsToInclude
+            1 + 2 * T_DEPENDENT_GRADIENTS.get(pulsar, 1)
+            for pulsar in PULSARS_TO_INCLUDE
         ])  # dependent gradients, not sure what they are
     )
 
-    M = np.zeros([nRow, nCol])
-
-    # TODO: create the matrix which is just a record for each (pulsar, time)
-    # pair with columns kind of all over the place (look for subsetting in the
-    # actual use of this matrix in case it's overkill to form it and then break
-    # it up)
-
-    ############################
-    # Make Dense Design Matrix #
-    ############################
-
-    nRowDense = (~dataDense.masked).sum()
-
-    Mdense = np.zeros([nRowDense, nCol])
-
+    M = make_design_matrix(nRow, nCol, pulsarGammas, angles, masked=True)
+    Mdense = make_design_matrix(
+        nRowDense, nCol, pulsarGammasDense, anglesDense, masked=False
+    )
 
     ##############
     # Do fitting #
     ##############
 
-    stackedHipass = []
-    for i in range(len(maskedDMs)):
-        for j in range(len(maskedDMs[i])):
-            stackedHipass.append(maskedDMs[i][j] - maskedSmoothed[i][j])
+    # basic assumption here is that there exists a deltaP: M deltaP = smoothed.
+    # I'm not even sure of that any more, honestly
+    unmasked = data[~data.masked]
+    hipass = unmasked[['pulsar', 'dm', 'dm_smooth']].copy()
+    hipass.loc[:, 'dm_delta'] = hipass.dm - hipass.dm_smooth
 
-    C = zeros([len(stackedHipass), len(stackedHipass)])
-    Cinv = zeros([len(stackedHipass), len(stackedHipass)])
-    index = 0
-    for i in range(len(maskedErrors)):
-        for j in range(len(maskedErrors[i])):
-            C[index][index] = maskedErrors[i][j] ** 2
-            Cinv[index][index] = maskedErrors[i][j] **  - 2
-            index += 1
+    # make a square matrix which contains M so we can invert it? Why do the
+    # error terms when they'll wash out below?
+    c = np.diag(unmasked.error.values ** 2)
+    cInv = np.diag(unmasked.error.values ** -2)
 
-    CpInv = np.dot(transpose(M), np.dot(Cinv, M))
-    Cp = linalg.inv(CpInv)
+    cpInv = M.T @ cInv @ M
+    cp = np.linalg.inv(cpInv)
 
-    deltaP = np.dot(Cp, np.dot(transpose(M), np.dot(Cinv, stackedHipass)))
+    # the below ultimately resolves to: deltaP = M^-1 . smoothed, or
+    # M deltaP = smoothed
+    deltaP = cp @ M.T @ cInv @ hipass.dm_delta.values
 
 
     #########################################
     # Form best fit models and dense models #
     #########################################
 
-    models = []
-    modelsDense = []
-    sunModelsDense = []
-    pxModelsDense = []
-    sunModelMoments = []
-    shift = 0
-    shiftDense = 0
-    for i in range(len(pulsarsToInclude)):
-        models.append([])
-        modelsDense.append([])
-        sunModelsDense.append([])
-        pxModelsDense.append([])
-        sunModelMoments.append([])
-        for j in range(Nmoment):
-            sunModelMoments[i].append([])
-            for j in range(len(maskedTimes[i])):
-                val = 0
-                for k in range(len(deltaP)):
-                    val += deltaP[k] * M[j + shift][k]
-                    models[i].append(val)
-                    shift += len(maskedTimes[i])
-                    for j in range(len(denseTimes[i])):
-                        val = 0
-                        sunval = 0
-                        pxval = 0
-                        momentVals = zeros(Nmoment)
-                        for k in range(len(deltaP)):
-                            val += deltaP[k] * Mdense[j + shiftDense][k]
-                            if k < N_GRID * Nmoment:
-                                sunval += deltaP[k] * Mdense[j + shiftDense][k]
-                                momentVals[k / N_GRID] += deltaP[k] * Mdense[j + shiftDense][k]
-    else:
-        pxval += deltaP[k] * Mdense[j + shiftDense][k]
-        modelsDense[i].append(val)
-        sunModelsDense[i].append(sunval)
-        pxModelsDense[i].append(pxval)
-        for k in range(Nmoment):
-            sunModelMoments[i][k].append(momentVals[k])
-            shiftDense += len(denseTimes[i])
+    N_SUN = N_GRID * N_LMS
+    N_MOMENT_GRID = list(range(0, N_GAMMA + 1, N_GRID))
+
+    models = M @ deltaP
+    modelsDense = Mdense @ deltaP
+    sunModelsDense = Mdense[:, :N_SUN] @ deltaP[:N_SUN]
+    pxModelsDense = Mdense[:, N_SUN:] @ deltaP[N_SUN:]
+    sunModelMoments = np.array([
+        Mdense[:, i0: i1] @ deltaP[i0: i1]
+        for (i0, i1) in zip(N_MOMENT_GRID[:-1], N_MOMENT_GRID[1:])
+    ]).T
 
     #####################
     # Compute residuals #
     #####################
 
-    residuals = []
-    for i in range(len(pulsarsToInclude)):
-        residuals.append([])
-        for j in range(len(models[i])):
-            residuals[i].append(maskedDMs[i][j] - maskedSmoothed[i][j] - models[i][j])
+    residuals = unmasked.dm - unmasked.dm_smooth - models
 
 
     ################
     # Compute a X2 #
     ################
 
-    X2 = 0
-    nDOF =  - len(deltaP)
-    for i in range(len(residuals)):
-        for j in range(len(residuals[i])):
-            X2 += (residuals[i][j] / maskedErrors[i][j]) ** 2
-            nDOF += 1
-
-    print(X2, nDOF, X2 / nDOF)
+    chi2 = ((residuals - unmasked.error) ** 2).sum()
+    nDof = residuals.shape[0] - deltaP.shape[0]
+    print('chi2 = {}'.format(chi2))
+    print('nDof = {}'.format(nDof))
+    print('chi2 / nDof = {}'.format(chi2 / nDof))
 
     ##############
     # Make plots #
     ##############
 
+    def make_plot(pulsar):
+        unmasked = data[~data.masked]
+        beta = coords.loc[pulsar].beta
 
-    def makePlot(index):
-        pulsar = pulsarsToInclude[index]
-        beta = Betas[index]
-
-        fig = figure(figsize=(15, 12))
-        #ax1 = fig.add_axes([.15, .79, .8, .15])
+        fig = plt.figure(figsize=(15, 12))
         ax2 = fig.add_axes([.1, .27, .85, .70])
         ax3 = fig.add_axes([.1, .10, .85, .15])
-        #ax1.set_xticks([])
         ax2.set_xticks([])
 
-        ax2.set_title(pulsar + '  ' + r'$(\beta=$' + str(beta * 180 / pi)[0:5] + r'$^\circ)$', size=18)
+        ax2.set_title(
+            '{}  $(\\beta={:.5}^\\circ)$'.format(pulsar, beta * 180 / np.pi),
+            size=18
+        )
+
+        ax2.set_ylabel('${\\rm DMX}$ $[{\\rm pc}$ ${\\rm cm}^{-3}]$', size=18)
+        ax3.set_ylabel('${\\rm Resids.}$', size=18)
+        ax3.set_xlabel('${\\rm Time}$ $[{\\rm MJD}]$', size=18)
+
+        pulsarInd = unmasked.pulsar == pulsar
+        d = unmasked[pulsarInd]
+        modInd = np.where(pulsarInd)[0]
+
+        ax2.plot(d.time, d.dm_smooth, 'b')
+        ax2.errorbar(d.time, d.dm, d.error, fmt='k.')
+        ax2.plot(d.time, models[modInd] + d.dm_smooth, 'r')
+        ax2.plot(d.time, models[modInd] + d.dm_smooth, 'r.', markersize=8)
+
+        ax3.errorbar(d.time, residuals[pulsarInd], d.error, fmt='k.')
+        ax3.plot([unmasked.time.min(), unmasked.time.max()], [0, 0], 'k')
+
+        #ax1.set_xlim([unmasked.time.min(), unmasked.time.max()])
+        ax2.set_xlim([unmasked.time.min(), unmasked.time.max()])
+        ax3.set_xlim([unmasked.time.min(), unmasked.time.max()])
+
+        plt.show()
+        plt.close('all')
+
+        #fig.savefig('officialDMPlots/' + pulsar + '.png')
+        #close()
+
+    if DO_PLOT == 0:
+        for pulsar in PULSARS_TO_INCLUDE:
+            make_plot(pulsar)
 
 
-        ax2.set_ylabel(r'${\rm DMX}$' + ' ' + r'$[{\rm pc}$' + ' ' + r'${\rm cm}^{ - 3}]$', size=18)
-        ax3.set_ylabel(r'${\rm Resids.}$', size=18)
-        ax3.set_xlabel(r'${\rm Time}$' + ' ' + r'$[{\rm MJD}]$', size=18)
-
-        #ax1.plot(denseTimes[index], modelsDense[index], 'r')
-        #ax1.plot(denseTimes[index], pxModelsDense[index], 'g')
-        #ax1.plot(denseTimes[index], sunModelsDense[index], 'm')
-
-        ax2.plot(maskedTimes[index], maskedSmoothed[index], 'b')
-        ax2.errorbar(pulsarTimes[index], pulsarDMs[index], pulsarErrors[index], fmt='k.')
-        ax2.plot(maskedTimes[index], models[index] + maskedSmoothed[index], 'r')
-        ax2.plot(maskedTimes[index], models[index] + maskedSmoothed[index], 'r.', markersize=8)
-
-        ax3.errorbar(maskedTimes[index], residuals[index], maskedErrors[index], fmt='k.')
-        ax3.plot([tMin, tMax], [0, 0], 'k')
-
-        #ax1.set_xlim([tMin, tMax])
-        ax2.set_xlim([tMin, tMax])
-        ax3.set_xlim([tMin, tMax])
-
-        fig.savefig('officialDMPlots/' + pulsar + '.png')
-        close()
-
-
-    if doPlot == 0:
-        for i in range(len(pulsarsToInclude)):
-            makePlot(i)
+if __name__ == '__main__':
+    main()
