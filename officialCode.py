@@ -3,7 +3,7 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pylab
+import seaborn as sns
 
 import filecache
 
@@ -82,7 +82,7 @@ def gamma_func(dfEarth, dfPulsar, l, m, delta=1e-2, dMax=1e2):
             dfCurrentDensity = rho_func(dfCurrent, l, m)
             dfTraversed = dfCurrent - dfEarth
 
-    #val /= pylab.norm(traversed)
+    #val /= np.linalg.norm(traversed)
 
     return dfGamma
 
@@ -129,14 +129,14 @@ def gen_gamma(pulsar, l, m, dense=False):
 
 
 def phi_hat_projector(dfEarth, ssbPulsar):
-    pHat = ssbPulsar / pylab.norm(ssbPulsar)
+    pHat = ssbPulsar / np.linalg.norm(ssbPulsar)
     phi = np.arctan(pHat[1] / pHat[0])
     phiHat = np.array([-np.sin(phi), np.cos(phi), 0])
     return dfEarth.dot(phiHat)
 
 
 def theta_hat_projector(dfEarth, ssbPulsar):
-    pHat = ssbPulsar / pylab.norm(ssbPulsar)
+    pHat = ssbPulsar / np.linalg.norm(ssbPulsar)
     phi = np.arctan(pHat[1] / pHat[0])
     theta = np.arccos(pHat[2])
     thetaHat = np.array([
@@ -358,7 +358,7 @@ def main():
         objs=[
             (
                 gen_gamma(pulsar, l, m, dense=True)
-                if DO_INTEGRATE
+                if DO_DENSE_INTEGRATE
                 else filecache.load_gammas(pulsar, l, m, dense=True, version='new')
             )
             for pulsar in PULSARS_TO_INCLUDE
@@ -570,11 +570,13 @@ def main():
         ax2.set_xlim([unmasked.time.min(), unmasked.time.max()])
         ax3.set_xlim([unmasked.time.min(), unmasked.time.max()])
 
-        plt.show()
-        plt.close('all')
+        #plt.show()
+        #plt.close('all')
 
-        #fig.savefig('officialDMPlots/' + pulsar + '.png')
-        #close()
+        if not os.path.isdir(PLOT_DIR):
+            os.makedirs(PLOT_DIR)
+        fig.savefig(os.path.join(PLOT_DIR, '{}.png'.format(pulsar)))
+        plt.close()
 
     if DO_PLOT == 0:
         for pulsar in PULSARS_TO_INCLUDE:

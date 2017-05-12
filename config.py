@@ -1,19 +1,24 @@
 # configuration for the DMX analysis
+import os
 
+# file path stuff
+HERE = os.path.realpath(os.path.dirname(__file__))
+PLOT_DIR = os.path.join(HERE, 'officialDMPlots')
+
+# astro constants
 TREF = 55462.129
 PYEAR = 365.25
 AU_PER_LS = 1.0 / 499.005
 
+# discretizing params
 L_MAX = 1
 N_GRID = 6
 T_SMOOTH = 2.0 * PYEAR
 
+# behavior flags
 DO_INTEGRATE = False
 DO_DENSE_INTEGRATE = False
 DO_PLOT = False
-DO_EMCEE = False
-emceeSteps = 3000
-emceeBurn = 0
 
 
 PULSARS_TO_INCLUDE = [
@@ -39,30 +44,29 @@ PULSARS_TO_INCLUDE = [
     #'J2302+4442',
 ]
 
-
 #more complicated DM parallax model
-T_DEPENDENT_GRADIENTS = dict([
-    #('B1937+21, 2),
-    ('J0340+4130', 2),
-    ('J0613-0200', 2),
-    ('J0645+5158', 2),
-    #('J0931-1902', 2),
-    ('J1012+5307', 2),
-    ('J1024-0719', 2),
-    ('J1455-3330', 2),
-    ('J1600-3053', 2),
-    ('J1614-2230', 2),
-    ('J1643-1224', 5),
-    ('J1713+0747', 2),
-    ('J1744-1134', 2),
-    ('J1747-4036', 2),
-    #('J1832-0836', 2),
-    ('J1909-3744', 2),
-    ('J1918-0642', 2),
-    ('J2010-1323', 2),
-    ('J2145-0750', 2),
-    ('J2302+4442', 2),
-])
+T_DEPENDENT_GRADIENTS = {
+    #'B1937+21': 2,
+    'J0340+4130': 2,
+    'J0613-0200': 2,
+    'J0645+5158': 2,
+    #'J0931-1902': 2,
+    'J1012+5307': 2,
+    'J1024-0719': 2,
+    'J1455-3330': 2,
+    'J1600-3053': 2,
+    'J1614-2230': 2,
+    'J1643-1224': 5,
+    'J1713+0747': 2,
+    'J1744-1134': 2,
+    'J1747-4036': 2,
+    #'J1832-0836': 2,
+    'J1909-3744': 2,
+    'J1918-0642': 2,
+    'J2010-1323': 2,
+    'J2145-0750': 2,
+    'J2302+4442': 2,
+}
 
 #excise a certain portion of a particular data set
 MASKS = [
